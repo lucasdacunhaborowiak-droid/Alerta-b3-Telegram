@@ -2,36 +2,77 @@ name: Verificar Alertas de Preço B3
 
 on:
   schedule:
-    # Roda a cada 15 min, dias úteis, 10h-18h horário de Brasília (13h-21h UTC)
-    - cron: '*/15 13-21 * * 1-5'
-  workflow_dispatch: {}  # permite rodar manualmente pelo site do GitHub
+    # GitHub Actions usa UTC. Brasília = UTC-3.
+    # Alertas: a cada 15 min, de segunda a sexta, aproximadamente 10h–18h BRT.
+    - cron: '*/15 13-20 * * 1-5'
+    - cron: '0 21 * * 1-5'
+    # Resumo de abertura: 10:10 BRT.
+    - cron: '10 13 * * 1-5'
+    # Resumo de fechamento: 17:55 BRT.
+    - cron: '55 20 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'O que deseja executar?'
+        required: true
+        default: 'test'
+        type: choice
+        options:
+          - test
+          - alerts
+          - open
+          - close
 
 permissions:
   contents: write
 
 jobs:
-  check:
+  run-bot:
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+    steps:
+      - name: Baixar repositório
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.12'
 
       - name: Instalar dependências
         run: pip install -r requirements.txt
 
-      - name: Verificar preços e enviar alertas
+      - name: Definir modo de execução
+        id: mode
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "value=${{ inputs.mode }}" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event.schedule }}" = "10 13 * * 1-5" ]; then
+            echo "value=open" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event.schedule }}" = "55 20 * * 1-5" ]; then
+            echo "value=close" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=alerts" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Executar bot
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          BOT_MODE: ${{ steps.mode.outputs.value }}
         run: python price_alert_bot.py
 
-      - name: Salvar alertas já disparados
+      - name: Salvar alertas disparados
+        if: steps.mode.outputs.value == 'alerts'
+        shell: bash
         run: |
-          git config user.name "github-actions"
-          git config user.email "actions@github.com"
+          if git diff --quiet -- alerts.json; then
+            echo "Nenhuma alteração em alerts.json"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add alerts.json
-          git diff --staged --quiet || git commit -m "Atualiza status dos alertas"
+          git commit -m "Atualiza alertas disparados"
           git push
