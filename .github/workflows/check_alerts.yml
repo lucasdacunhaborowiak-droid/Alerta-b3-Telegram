@@ -3,13 +3,20 @@ name: Verificar Alertas de Preço B3
 on:
   schedule:
     # GitHub Actions usa UTC. Brasília = UTC-3.
-    # Alertas: a cada 15 min, de segunda a sexta, aproximadamente 10h–18h BRT.
+
+    # Alertas: a cada 15 min, de segunda a sexta,
+    # aproximadamente 10h–18h BRT.
     - cron: '*/15 13-20 * * 1-5'
+
+    # Verificação extra às 18:00 BRT.
     - cron: '0 21 * * 1-5'
+
     # Resumo de abertura: 10:10 BRT.
     - cron: '10 13 * * 1-5'
-    # Resumo de fechamento: 17:55 BRT.
-    - cron: '55 20 * * 1-5'
+
+    # Resumo de fechamento: 18:20 BRT.
+    - cron: '20 21 * * 1-5'
+
   workflow_dispatch:
     inputs:
       mode:
@@ -48,10 +55,13 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "value=${{ inputs.mode }}" >> "$GITHUB_OUTPUT"
+
           elif [ "${{ github.event.schedule }}" = "10 13 * * 1-5" ]; then
             echo "value=open" >> "$GITHUB_OUTPUT"
-          elif [ "${{ github.event.schedule }}" = "55 20 * * 1-5" ]; then
+
+          elif [ "${{ github.event.schedule }}" = "20 21 * * 1-5" ]; then
             echo "value=close" >> "$GITHUB_OUTPUT"
+
           else
             echo "value=alerts" >> "$GITHUB_OUTPUT"
           fi
@@ -71,8 +81,10 @@ jobs:
             echo "Nenhuma alteração em alerts.json"
             exit 0
           fi
+
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
           git add alerts.json
           git commit -m "Atualiza alertas disparados"
           git push
