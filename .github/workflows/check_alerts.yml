@@ -1,0 +1,37 @@
+name: Verificar Alertas de Preço B3
+
+on:
+  schedule:
+    # Roda a cada 15 min, dias úteis, 10h-18h horário de Brasília (13h-21h UTC)
+    - cron: '*/15 13-21 * * 1-5'
+  workflow_dispatch: {}  # permite rodar manualmente pelo site do GitHub
+
+permissions:
+  contents: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependências
+        run: pip install -r requirements.txt
+
+      - name: Verificar preços e enviar alertas
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python price_alert_bot.py
+
+      - name: Salvar alertas já disparados
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add alerts.json
+          git diff --staged --quiet || git commit -m "Atualiza status dos alertas"
+          git push
