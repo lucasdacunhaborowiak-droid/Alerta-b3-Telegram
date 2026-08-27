@@ -2,18 +2,13 @@ name: Verificar Alertas de Preço B3
 
 on:
   schedule:
-    # GitHub Actions usa UTC. Brasília = UTC-3.
-
-    # Alertas: a cada 15 min, de segunda a sexta,
-    # aproximadamente 10h–18h BRT.
+    # GitHub Actions usa UTC. Brasília = UTC-3 (sem horário de verão desde 2019).
+    # Alertas: a cada 15 min, seg-sex, ~10h-17h45 BRT.
     - cron: '*/15 13-20 * * 1-5'
-
     # Verificação extra às 18:00 BRT.
     - cron: '0 21 * * 1-5'
-
     # Resumo de abertura: 10:10 BRT.
     - cron: '10 13 * * 1-5'
-
     # Resumo de fechamento: 18:20 BRT.
     - cron: '20 21 * * 1-5'
 
@@ -33,9 +28,15 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: price-alert-bot
+  cancel-in-progress: false   # evita dois runs mexendo no alerts.json ao mesmo tempo,
+                                # mas sem cancelar um run em andamento
+
 jobs:
   run-bot:
     runs-on: ubuntu-latest
+    timeout-minutes: 10        # evita runs travados consumindo minutos do plano
 
     steps:
       - name: Baixar repositório
@@ -45,6 +46,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+          cache: 'pip'          # acelera runs subsequentes
 
       - name: Instalar dependências
         run: pip install -r requirements.txt
@@ -55,13 +57,10 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "value=${{ inputs.mode }}" >> "$GITHUB_OUTPUT"
-
           elif [ "${{ github.event.schedule }}" = "10 13 * * 1-5" ]; then
             echo "value=open" >> "$GITHUB_OUTPUT"
-
           elif [ "${{ github.event.schedule }}" = "20 21 * * 1-5" ]; then
             echo "value=close" >> "$GITHUB_OUTPUT"
-
           else
             echo "value=alerts" >> "$GITHUB_OUTPUT"
           fi
@@ -73,18 +72,18 @@ jobs:
           BOT_MODE: ${{ steps.mode.outputs.value }}
         run: python price_alert_bot.py
 
-      - name: Salvar alertas disparados
-        if: steps.mode.outputs.value == 'alerts'
+      - name: Salvar alertas.json (se houver mudanças)
+        if: steps.mode.outputs.value != 'test'
         shell: bash
         run: |
           if git diff --quiet -- alerts.json; then
             echo "Nenhuma alteração em alerts.json"
             exit 0
           fi
-
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
           git add alerts.json
-          git commit -m "Atualiza alertas disparados"
+          git commit -m "Atualiza alerts.json (modo: ${{ steps.mode.outputs.value }})"
+          # Evita falha caso outro run tenha dado push entre o checkout e agora
+          git pull --rebase origin "${{ github.ref_name }}"
           git push
