@@ -610,7 +610,7 @@
       "ticker": "BTC-USD",
       "target_price": 76135,
       "condition": "below",
-      "triggered": false
+      "triggered": true
     },
     {
       "ticker": "BTC-USD",
