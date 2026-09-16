@@ -366,7 +366,7 @@
       "ticker": "QQQI11.SA",
       "target_price": 93.91,
       "condition": "below",
-      "triggered": false
+      "triggered": true
     },
     {
       "ticker": "QQQI11.SA",
