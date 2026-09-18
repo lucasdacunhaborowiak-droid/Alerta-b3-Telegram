@@ -488,7 +488,7 @@
       "ticker": "HGRU11.SA",
       "target_price": 112.22,
       "condition": "below",
-      "triggered": false
+      "triggered": true
     },
     {
       "ticker": "HGRU11.SA",
