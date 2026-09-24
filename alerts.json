@@ -512,7 +512,7 @@
       "ticker": "KNCR11.SA",
       "target_price": 105.2,
       "condition": "below",
-      "triggered": false
+      "triggered": true
     },
     {
       "ticker": "KNCR11.SA",
