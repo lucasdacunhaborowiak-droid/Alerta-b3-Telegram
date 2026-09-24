@@ -554,7 +554,7 @@
       "ticker": "XPML11.SA",
       "target_price": 97.6,
       "condition": "below",
-      "triggered": false
+      "triggered": true
     },
     {
       "ticker": "XPML11.SA",
