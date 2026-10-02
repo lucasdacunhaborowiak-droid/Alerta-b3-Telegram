@@ -402,7 +402,7 @@
       "ticker": "TECX11.SA",
       "target_price": 151,
       "condition": "below",
-      "triggered": false
+      "triggered": true
     },
     {
       "ticker": "TECX11.SA",
