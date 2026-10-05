@@ -1,3 +1,66 @@
+name: Verificar Alertas de Preço B3
+
+on:
+  schedule:
+    # GitHub Actions usa UTC.
+    # Brasília = UTC-3.
+
+    # Alertas a cada 15 minutos, evitando minuto 00.
+    - cron: '2,17,32,47 13-20 * * 1-5'
+
+    # Auditoria final perto do encerramento.
+    - cron: '58 20 * * 1-5'
+
+    # Resumo de abertura: 10:10 BRT.
+    - cron: '10 13 * * 1-5'
+
+    # Resumo de fechamento: 17:55 BRT.
+    - cron: '55 20 * * 1-5'
+
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'O que deseja executar?'
+        required: true
+        default: 'test'
+        type: choice
+        options:
+          - test
+          - alerts
+          - open
+          - close
+
+permissions:
+  contents: write
+
+concurrency:
+  group: price-alert-bot
+  cancel-in-progress: false
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Baixar repositório
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Instalar dependências
+        run: pip install -r requirements.txt
+
+      - name: Definir modo de execução
+        id: mode
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "value=${{ inputs.mode }}" >> "$GITHUB_OUTPUT"
           elif [ "${{ github.event.schedule }}" = "10 13 * * 1-5" ]; then
             echo "value=open" >> "$GITHUB_OUTPUT"
           elif [ "${{ github.event.schedule }}" = "55 20 * * 1-5" ]; then
@@ -9,22 +72,14 @@
       - name: Executar bot
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
-
-          # Chat atual: abertura/fechamento.
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-
-          # Novo grupo: alertas de compra.
           TELEGRAM_BUY_CHAT_ID: ${{ secrets.TELEGRAM_BUY_CHAT_ID }}
-
-          # Opcional por enquanto. Quando você criar esse Secret,
-          # as vendas passarão automaticamente para o grupo separado.
           TELEGRAM_SELL_CHAT_ID: ${{ secrets.TELEGRAM_SELL_CHAT_ID }}
-
           BOT_MODE: ${{ steps.mode.outputs.value }}
 
         run: python price_alert_bot.py
 
-      - name: Salvar alerts.json (se houver mudanças)
+      - name: Salvar alerts.json
         if: steps.mode.outputs.value != 'test'
         shell: bash
         run: |
@@ -39,6 +94,5 @@
           git add alerts.json
           git commit -m "Atualiza alerts.json (modo: ${{ steps.mode.outputs.value }})"
 
-          # Tenta incorporar mudanças remotas sem sobrescrever o arquivo.
           git pull --rebase origin "${{ github.ref_name }}"
           git push
