@@ -33,10 +33,6 @@ on:
 permissions:
   contents: write
 
-concurrency:
-  group: price-alert-bot
-  cancel-in-progress: false
-
 jobs:
   run-bot:
     runs-on: ubuntu-latest
