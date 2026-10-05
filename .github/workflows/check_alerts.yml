@@ -1,65 +1,6 @@
-name: Verificar Alertas de Preço B3
-
-on:
-  schedule:
-    # GitHub Actions usa UTC. Brasília = UTC-3 (sem horário de verão desde 2019).
-    # Alertas: a cada 15 min, seg-sex, ~10h-17h45 BRT.
-    - cron: '*/15 13-20 * * 1-5'
-    # Verificação extra às 18:00 BRT.
-    - cron: '0 21 * * 1-5'
-    # Resumo de abertura: 10:10 BRT.
-    - cron: '10 13 * * 1-5'
-    # Resumo de fechamento: 18:20 BRT.
-    - cron: '20 21 * * 1-5'
-
-  workflow_dispatch:
-    inputs:
-      mode:
-        description: 'O que deseja executar?'
-        required: true
-        default: 'test'
-        type: choice
-        options:
-          - test
-          - alerts
-          - open
-          - close
-
-permissions:
-  contents: write
-
-concurrency:
-  group: price-alert-bot
-  cancel-in-progress: false   # evita dois runs mexendo no alerts.json ao mesmo tempo,
-                                # mas sem cancelar um run em andamento
-
-jobs:
-  run-bot:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10        # evita runs travados consumindo minutos do plano
-
-    steps:
-      - name: Baixar repositório
-        uses: actions/checkout@v4
-
-      - name: Configurar Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-          cache: 'pip'          # acelera runs subsequentes
-
-      - name: Instalar dependências
-        run: pip install -r requirements.txt
-
-      - name: Definir modo de execução
-        id: mode
-        shell: bash
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "value=${{ inputs.mode }}" >> "$GITHUB_OUTPUT"
           elif [ "${{ github.event.schedule }}" = "10 13 * * 1-5" ]; then
             echo "value=open" >> "$GITHUB_OUTPUT"
-          elif [ "${{ github.event.schedule }}" = "20 21 * * 1-5" ]; then
+          elif [ "${{ github.event.schedule }}" = "55 20 * * 1-5" ]; then
             echo "value=close" >> "$GITHUB_OUTPUT"
           else
             echo "value=alerts" >> "$GITHUB_OUTPUT"
@@ -68,11 +9,22 @@ jobs:
       - name: Executar bot
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+
+          # Chat atual: abertura/fechamento.
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+
+          # Novo grupo: alertas de compra.
+          TELEGRAM_BUY_CHAT_ID: ${{ secrets.TELEGRAM_BUY_CHAT_ID }}
+
+          # Opcional por enquanto. Quando você criar esse Secret,
+          # as vendas passarão automaticamente para o grupo separado.
+          TELEGRAM_SELL_CHAT_ID: ${{ secrets.TELEGRAM_SELL_CHAT_ID }}
+
           BOT_MODE: ${{ steps.mode.outputs.value }}
+
         run: python price_alert_bot.py
 
-      - name: Salvar alertas.json (se houver mudanças)
+      - name: Salvar alerts.json (se houver mudanças)
         if: steps.mode.outputs.value != 'test'
         shell: bash
         run: |
@@ -80,10 +32,13 @@ jobs:
             echo "Nenhuma alteração em alerts.json"
             exit 0
           fi
+
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
           git add alerts.json
           git commit -m "Atualiza alerts.json (modo: ${{ steps.mode.outputs.value }})"
-          # Evita falha caso outro run tenha dado push entre o checkout e agora
+
+          # Tenta incorporar mudanças remotas sem sobrescrever o arquivo.
           git pull --rebase origin "${{ github.ref_name }}"
           git push
