@@ -12,20 +12,94 @@ CONFIG_PATH = "alerts.json"
 
 TELEGRAM_TOKEN = os.environ["TELEGRAM_TOKEN"]
 
+# Chat principal: abertura e fechamento
 SUMMARY_CHAT_ID = os.environ["TELEGRAM_CHAT_ID"]
+
+# Grupo de compras
 BUY_CHAT_ID = os.getenv("TELEGRAM_BUY_CHAT_ID") or SUMMARY_CHAT_ID
+
+# Grupo de vendas será configurado depois.
+# Enquanto não existir, usa o chat principal.
 SELL_CHAT_ID = os.getenv("TELEGRAM_SELL_CHAT_ID") or SUMMARY_CHAT_ID
 
 BRT = ZoneInfo("America/Sao_Paulo")
 
 
+# =========================================================
+# UTILIDADES
+# =========================================================
+
 def categories_only(data):
+    """
+    Retorna apenas as categorias que contêm listas de alertas.
+    Permite adicionar metadados ao JSON futuramente sem quebrar o bot.
+    """
     for category, alerts in data.items():
         if isinstance(alerts, list):
             yield category, alerts
 
 
+def valid_market_value(value):
+    """
+    Remove valores inválidos vindos da API,
+    principalmente 0, None, negativos etc.
+    """
+    if value is None:
+        return False
+
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return False
+
+    return value > 0
+
+
+def sane_intraday_value(value, current_price):
+    """
+    Segunda proteção contra ticks absurdos da fonte de dados.
+
+    Exemplo do problema encontrado:
+    ITUB4 = R$ 49
+    Yahoo retornou mínima = R$ 0,00
+
+    Um valor intraday precisa ser positivo e razoavelmente
+    relacionado ao preço atual.
+    """
+    if not valid_market_value(value):
+        return False
+
+    if not valid_market_value(current_price):
+        return False
+
+    value = float(value)
+    current_price = float(current_price)
+
+    # Proteção bastante ampla.
+    # Aceita movimentos de até 80% para baixo
+    # ou até 400% para cima no mesmo dia.
+    minimum_reasonable = current_price * 0.20
+    maximum_reasonable = current_price * 5.00
+
+    return minimum_reasonable <= value <= maximum_reasonable
+
+
+# =========================================================
+# YAHOO FINANCE
+# =========================================================
+
 def get_quote(ticker, retries=3):
+    """
+    Busca:
+    - preço atual
+    - fechamento anterior
+    - variação %
+    - mínima do dia
+    - máxima do dia
+
+    Faz retry automático.
+    """
+
     url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}"
 
     headers = {
@@ -41,7 +115,9 @@ def get_quote(ticker, retries=3):
     last_error = None
 
     for attempt in range(1, retries + 1):
+
         try:
+
             response = requests.get(
                 url,
                 headers=headers,
@@ -53,73 +129,136 @@ def get_quote(ticker, retries=3):
 
             data = response.json()
 
-            result = data["chart"]["result"][0]
-            meta = result["meta"]
+            chart = data.get("chart") or {}
+            results = chart.get("result") or []
+
+            if not results:
+                raise ValueError(
+                    f"Yahoo não retornou dados para {ticker}"
+                )
+
+            result = results[0]
+            meta = result.get("meta") or {}
 
             price = meta.get("regularMarketPrice")
+
+            if not valid_market_value(price):
+                raise ValueError(
+                    f"Preço atual inválido para {ticker}: {price}"
+                )
+
+            price = float(price)
 
             previous_close = (
                 meta.get("previousClose")
                 or meta.get("chartPreviousClose")
             )
 
-            if price is None:
-                raise ValueError(
-                    f"Preço indisponível para {ticker}"
-                )
+            if valid_market_value(previous_close):
+                previous_close = float(previous_close)
+            else:
+                previous_close = None
 
-            day_low = meta.get("regularMarketDayLow")
-            day_high = meta.get("regularMarketDayHigh")
+            # -------------------------------------------------
+            # PRIMEIRA OPÇÃO:
+            # mínima/máxima oficial da sessão no metadata
+            # -------------------------------------------------
+
+            raw_day_low = meta.get("regularMarketDayLow")
+            raw_day_high = meta.get("regularMarketDayHigh")
+
+            day_low = None
+            day_high = None
+
+            if sane_intraday_value(raw_day_low, price):
+                day_low = float(raw_day_low)
+
+            if sane_intraday_value(raw_day_high, price):
+                day_high = float(raw_day_high)
+
+            # -------------------------------------------------
+            # SEGUNDA OPÇÃO:
+            # candles intraday de 5 minutos
+            # -------------------------------------------------
 
             indicators = result.get("indicators") or {}
             quote_blocks = indicators.get("quote") or []
 
             if quote_blocks:
 
-                lows = [
-                    value
-                    for value in quote_blocks[0].get("low", [])
-                    if value is not None
-                ]
+                quote_data = quote_blocks[0]
 
-                highs = [
-                    value
-                    for value in quote_blocks[0].get("high", [])
-                    if value is not None
-                ]
+                raw_lows = quote_data.get("low") or []
+                raw_highs = quote_data.get("high") or []
 
+                # IMPORTANTE:
+                # remove explicitamente zero, negativos, None
+                # e qualquer valor absurdo.
+                lows = []
+
+                for value in raw_lows:
+
+                    if sane_intraday_value(value, price):
+                        lows.append(float(value))
+
+                highs = []
+
+                for value in raw_highs:
+
+                    if sane_intraday_value(value, price):
+                        highs.append(float(value))
+
+                # Só usa candles caso metadata não tenha
+                # uma mínima/máxima válida.
                 if day_low is None and lows:
                     day_low = min(lows)
 
                 if day_high is None and highs:
                     day_high = max(highs)
 
+            # -------------------------------------------------
+            # ÚLTIMA PROTEÇÃO
+            # -------------------------------------------------
+
+            if day_low is None:
+                day_low = price
+
+            if day_high is None:
+                day_high = price
+
+            # Nunca aceita 0 ou negativo.
+            if day_low <= 0:
+                day_low = price
+
+            if day_high <= 0:
+                day_high = price
+
+            # Mínima não deve ser maior do que máxima.
+            if day_low > day_high:
+                print(
+                    f"[AVISO] {ticker}: "
+                    f"mínima/máxima inconsistentes. "
+                    f"Usando preço atual."
+                )
+
+                day_low = price
+                day_high = price
+
             change_pct = None
 
             if previous_close not in (None, 0):
+
                 change_pct = (
                     (price - previous_close)
                     / previous_close
                 ) * 100
 
             return {
-                "price": float(price),
-                "previous_close": (
-                    float(previous_close)
-                    if previous_close is not None
-                    else None
-                ),
+                "price": price,
+                "previous_close": previous_close,
                 "change_pct": change_pct,
-                "day_low": (
-                    float(day_low)
-                    if day_low is not None
-                    else float(price)
-                ),
-                "day_high": (
-                    float(day_high)
-                    if day_high is not None
-                    else float(price)
-                )
+                "day_low": float(day_low),
+                "day_high": float(day_high)
             }
 
         except Exception as error:
@@ -135,12 +274,26 @@ def get_quote(ticker, retries=3):
                 time.sleep(2 * attempt)
 
     raise RuntimeError(
-        f"Falha ao buscar {ticker} após "
-        f"{retries} tentativas: {last_error}"
+        f"Falha ao buscar {ticker} "
+        f"após {retries} tentativas: {last_error}"
     )
 
 
+# =========================================================
+# TELEGRAM
+# =========================================================
+
 def send_telegram(message, chat_id):
+    """
+    Envia mensagem ao Telegram.
+
+    Só retorna sucesso caso a API confirme.
+    """
+
+    if not chat_id:
+        raise ValueError(
+            "Chat ID do Telegram não configurado."
+        )
 
     url = (
         f"https://api.telegram.org/"
@@ -165,11 +318,15 @@ def send_telegram(message, chat_id):
 
     if not result.get("ok"):
         raise RuntimeError(
-            f"Telegram não confirmou envio: {result}"
+            f"Telegram não confirmou o envio: {result}"
         )
 
     return True
 
+
+# =========================================================
+# ALERTS.JSON
+# =========================================================
 
 def load_alerts():
 
@@ -183,6 +340,12 @@ def load_alerts():
 
 
 def save_alerts(data):
+    """
+    Salva de maneira atômica.
+
+    Evita corromper alerts.json caso o processo
+    seja interrompido no meio da escrita.
+    """
 
     temp_path = f"{CONFIG_PATH}.tmp"
 
@@ -208,6 +371,10 @@ def save_alerts(data):
     )
 
 
+# =========================================================
+# FORMATAÇÃO
+# =========================================================
+
 def format_price(ticker, value):
 
     if ticker.endswith("-USD"):
@@ -215,6 +382,10 @@ def format_price(ticker, value):
 
     return f"R$ {value:,.2f}"
 
+
+# =========================================================
+# TICKERS
+# =========================================================
 
 def unique_tickers(categories):
 
@@ -239,6 +410,11 @@ def unique_tickers(categories):
 
 
 def build_quote_cache(categories):
+    """
+    Consulta cada ticker somente UMA vez por execução.
+
+    Todos os níveis daquele ativo usam a mesma cotação.
+    """
 
     cache = {}
     errors = {}
@@ -254,11 +430,16 @@ def build_quote_cache(categories):
             errors[ticker] = str(error)
 
             print(
-                f"[ERRO FINAL] {ticker}: {error}"
+                f"[ERRO FINAL] "
+                f"{ticker}: {error}"
             )
 
     return cache, errors
 
+
+# =========================================================
+# ALVO MAIS PRÓXIMO
+# =========================================================
 
 def nearest_pending_target(
     categories,
@@ -272,10 +453,10 @@ def nearest_pending_target(
 
         for alert in alerts:
 
-            if (
-                alert.get("ticker") != ticker
-                or alert.get("triggered")
-            ):
+            if alert.get("ticker") != ticker:
+                continue
+
+            if alert.get("triggered"):
                 continue
 
             target = float(
@@ -336,6 +517,10 @@ def nearest_pending_target(
     }
 
 
+# =========================================================
+# COMPRA / VENDA
+# =========================================================
+
 def resolve_alert_type(alert):
 
     explicit = str(
@@ -367,7 +552,20 @@ def alert_chat_id(alert):
     return BUY_CHAT_ID
 
 
+# =========================================================
+# VERIFICAÇÃO DOS ALVOS
+# =========================================================
+
 def hit_details(alert, quote):
+    """
+    Determina se o alvo foi atingido.
+
+    Para compra:
+    preço atual OU mínima válida do dia <= alvo.
+
+    Para venda:
+    preço atual OU máxima válida do dia >= alvo.
+    """
 
     target = float(
         alert["target_price"]
@@ -375,41 +573,80 @@ def hit_details(alert, quote):
 
     condition = alert["condition"]
 
+    current_price = quote["price"]
+    day_low = quote["day_low"]
+    day_high = quote["day_high"]
+
+    # Proteção adicional.
+    if not sane_intraday_value(
+        day_low,
+        current_price
+    ):
+        print(
+            f"[AVISO] Mínima inválida ignorada: "
+            f"{day_low}"
+        )
+
+        day_low = current_price
+
+    if not sane_intraday_value(
+        day_high,
+        current_price
+    ):
+        print(
+            f"[AVISO] Máxima inválida ignorada: "
+            f"{day_high}"
+        )
+
+        day_high = current_price
+
     if condition == "below":
 
-        hit = (
-            quote["price"] <= target
-            or
-            quote["day_low"] <= target
-        )
+        if current_price <= target:
 
-        observed = min(
-            quote["price"],
-            quote["day_low"]
-        )
+            return (
+                True,
+                current_price,
+                "preço atual"
+            )
 
-        if quote["price"] <= target:
-            source = "preço atual"
-        else:
-            source = "mínima do dia"
+        if day_low <= target:
+
+            return (
+                True,
+                day_low,
+                "mínima do dia"
+            )
+
+        return (
+            False,
+            day_low,
+            "mínima do dia"
+        )
 
     elif condition == "above":
 
-        hit = (
-            quote["price"] >= target
-            or
-            quote["day_high"] >= target
-        )
+        if current_price >= target:
 
-        observed = max(
-            quote["price"],
-            quote["day_high"]
-        )
+            return (
+                True,
+                current_price,
+                "preço atual"
+            )
 
-        if quote["price"] >= target:
-            source = "preço atual"
-        else:
-            source = "máxima do dia"
+        if day_high >= target:
+
+            return (
+                True,
+                day_high,
+                "máxima do dia"
+            )
+
+        return (
+            False,
+            day_high,
+            "máxima do dia"
+        )
 
     else:
 
@@ -417,12 +654,10 @@ def hit_details(alert, quote):
             f"Condição inválida: {condition}"
         )
 
-    return (
-        hit,
-        observed,
-        source
-    )
 
+# =========================================================
+# CHECK DOS ALERTAS
+# =========================================================
 
 def check_targets(categories):
 
@@ -437,6 +672,7 @@ def check_targets(categories):
 
         for alert in alerts:
 
+            # Já enviado anteriormente.
             if alert.get("triggered"):
                 continue
 
@@ -475,7 +711,8 @@ def check_targets(categories):
             except Exception as error:
 
                 print(
-                    f"[ERRO] {ticker}: {error}"
+                    f"[ERRO] "
+                    f"{ticker}: {error}"
                 )
 
                 continue
@@ -528,11 +765,14 @@ def check_targets(categories):
 
             try:
 
+                # Primeiro envia.
                 send_telegram(
                     message,
                     alert_chat_id(alert)
                 )
 
+                # SOMENTE depois da confirmação
+                # marca como disparado.
                 alert["triggered"] = True
 
                 alert["triggered_at"] = (
@@ -548,6 +788,7 @@ def check_targets(categories):
                     6
                 )
 
+                # Salva imediatamente.
                 save_alerts(categories)
 
                 sent_alerts += 1
@@ -590,6 +831,10 @@ def check_targets(categories):
                 f"- {ticker}: {error}"
             )
 
+
+# =========================================================
+# RESUMO DE ABERTURA / FECHAMENTO
+# =========================================================
 
 def send_market_summary(
     categories,
@@ -734,7 +979,8 @@ def send_market_summary(
 
         if len(candidate) > 3500:
 
-            chunks.append(current)
+            if current:
+                chunks.append(current)
 
             current = line
 
@@ -754,24 +1000,42 @@ def send_market_summary(
         )
 
 
+# =========================================================
+# TESTE
+# =========================================================
+
 def send_test_message():
 
     now = datetime.now(BRT)
 
+    # Testa chat principal.
     send_telegram(
         (
-            "✅ Bot de preços funcionando!\n"
-            f"Teste realizado em "
+            "✅ TESTE — CHAT PRINCIPAL\n"
             f"{now.strftime('%d/%m/%Y às %H:%M')} "
-            "(Brasília).\n"
-            "Resumo → chat principal\n"
-            "Compras → grupo de compras\n"
-            "Vendas → grupo de vendas "
-            "quando configurado."
+            "(Brasília)\n"
+            "Este chat receberá abertura "
+            "e fechamento."
         ),
         SUMMARY_CHAT_ID
     )
 
+    # Testa grupo de compras.
+    send_telegram(
+        (
+            "🟢 TESTE — ALERTAS DE COMPRA\n"
+            f"{now.strftime('%d/%m/%Y às %H:%M')} "
+            "(Brasília)\n"
+            "Este grupo receberá os "
+            "alertas de compra."
+        ),
+        BUY_CHAT_ID
+    )
+
+
+# =========================================================
+# MAIN
+# =========================================================
 
 def main():
 
