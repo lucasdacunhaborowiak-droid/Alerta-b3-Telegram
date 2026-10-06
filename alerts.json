@@ -420,7 +420,9 @@
       "ticker": "GOLD11.SA",
       "target_price": 21.6,
       "condition": "below",
-      "triggered": false
+      "triggered": true,
+      "triggered_at": "2026-10-05T21:14:49-03:00",
+      "trigger_price": 21.34
     },
     {
       "ticker": "GOLD11.SA",
@@ -518,7 +520,9 @@
       "ticker": "KNCR11.SA",
       "target_price": 104.3,
       "condition": "below",
-      "triggered": false
+      "triggered": true,
+      "triggered_at": "2026-10-05T21:14:50-03:00",
+      "trigger_price": 104.02
     },
     {
       "ticker": "KNCR11.SA",
