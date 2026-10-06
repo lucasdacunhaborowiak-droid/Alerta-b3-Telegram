@@ -2,21 +2,34 @@ name: Verificar Alertas de Preço B3
 
 on:
   schedule:
-    # GitHub Actions usa UTC.
-    # Brasília = UTC-3.
+    # =====================================================
+    # HORÁRIOS EM BRASÍLIA
+    # timezone: America/Sao_Paulo
+    # Segunda a sexta
+    # =====================================================
 
-    # Alertas a cada 15 minutos, evitando minuto 00.
-    - cron: '2,17,32,47 13-20 * * 1-5'
+    # Verificação dos alertas a cada 15 minutos
+    # 10:02, 10:17, 10:32, 10:47...
+    # até 17:47
+    - cron: '2,17,32,47 10-17 * * 1-5'
+      timezone: 'America/Sao_Paulo'
 
-    # Auditoria final perto do encerramento.
-    - cron: '58 20 * * 1-5'
+    # Resumo de abertura
+    # 10:10 horário de Brasília
+    - cron: '10 10 * * 1-5'
+      timezone: 'America/Sao_Paulo'
 
-    # Resumo de abertura: 10:10 BRT.
-    - cron: '10 13 * * 1-5'
+    # Resumo de fechamento
+    # 17:55 horário de Brasília
+    - cron: '55 17 * * 1-5'
+      timezone: 'America/Sao_Paulo'
 
-    # Resumo de fechamento: 17:55 BRT.
-    - cron: '55 20 * * 1-5'
+    # Última verificação dos alertas
+    # 17:58 horário de Brasília
+    - cron: '58 17 * * 1-5'
+      timezone: 'America/Sao_Paulo'
 
+  # Permite executar manualmente para testes
   workflow_dispatch:
     inputs:
       mode:
@@ -30,8 +43,10 @@ on:
           - open
           - close
 
+
 permissions:
   contents: write
+
 
 jobs:
   run-bot:
@@ -39,8 +54,18 @@ jobs:
     timeout-minutes: 10
 
     steps:
+
+      # =====================================================
+      # BAIXAR REPOSITÓRIO
+      # =====================================================
+
       - name: Baixar repositório
         uses: actions/checkout@v4
+
+
+      # =====================================================
+      # CONFIGURAR PYTHON
+      # =====================================================
 
       - name: Configurar Python
         uses: actions/setup-python@v5
@@ -48,47 +73,96 @@ jobs:
           python-version: '3.12'
           cache: 'pip'
 
+
+      # =====================================================
+      # DEPENDÊNCIAS
+      # =====================================================
+
       - name: Instalar dependências
         run: pip install -r requirements.txt
+
+
+      # =====================================================
+      # DEFINIR QUAL MODO O BOT DEVE EXECUTAR
+      # =====================================================
 
       - name: Definir modo de execução
         id: mode
         shell: bash
+
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+
             echo "value=${{ inputs.mode }}" >> "$GITHUB_OUTPUT"
-          elif [ "${{ github.event.schedule }}" = "10 13 * * 1-5" ]; then
+
+          elif [ "${{ github.event.schedule }}" = "10 10 * * 1-5" ]; then
+
             echo "value=open" >> "$GITHUB_OUTPUT"
-          elif [ "${{ github.event.schedule }}" = "55 20 * * 1-5" ]; then
+
+          elif [ "${{ github.event.schedule }}" = "55 17 * * 1-5" ]; then
+
             echo "value=close" >> "$GITHUB_OUTPUT"
+
           else
+
             echo "value=alerts" >> "$GITHUB_OUTPUT"
+
           fi
 
+
+      # =====================================================
+      # EXECUTAR BOT
+      # =====================================================
+
       - name: Executar bot
+
         env:
+          # Token do mesmo bot Telegram
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+
+          # Chat principal:
+          # abertura e fechamento
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+
+          # Grupo separado:
+          # alertas de compra
           TELEGRAM_BUY_CHAT_ID: ${{ secrets.TELEGRAM_BUY_CHAT_ID }}
+
+          # Grupo de venda:
+          # pode ficar vazio enquanto não configurarmos
           TELEGRAM_SELL_CHAT_ID: ${{ secrets.TELEGRAM_SELL_CHAT_ID }}
+
+          # Modo escolhido acima
           BOT_MODE: ${{ steps.mode.outputs.value }}
 
         run: python price_alert_bot.py
 
+
+      # =====================================================
+      # SALVAR ALTERAÇÕES NO ALERTS.JSON
+      # =====================================================
+
       - name: Salvar alerts.json
+
         if: steps.mode.outputs.value != 'test'
+
         shell: bash
+
         run: |
           if git diff --quiet -- alerts.json; then
+
             echo "Nenhuma alteração em alerts.json"
             exit 0
+
           fi
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           git add alerts.json
+
           git commit -m "Atualiza alerts.json (modo: ${{ steps.mode.outputs.value }})"
 
           git pull --rebase origin "${{ github.ref_name }}"
+
           git push
