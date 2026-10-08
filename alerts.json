@@ -408,7 +408,9 @@
       "ticker": "TECX11.SA",
       "target_price": 143,
       "condition": "below",
-      "triggered": false
+      "triggered": true,
+      "triggered_at": "2026-10-08T16:06:15-03:00",
+      "trigger_price": 140.82
     },
     {
       "ticker": "TECX11.SA",
