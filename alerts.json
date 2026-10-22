@@ -382,7 +382,9 @@
       "ticker": "QQQI11.SA",
       "target_price": 90.69,
       "condition": "below",
-      "triggered": false
+      "triggered": true,
+      "triggered_at": "2026-10-22T14:49:01-03:00",
+      "trigger_price": 90.5
     },
     {
       "ticker": "QQQI11.SA",
