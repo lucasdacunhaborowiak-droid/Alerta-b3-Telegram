@@ -246,7 +246,9 @@
       "ticker": "IVVB11.SA",
       "target_price": 430.2,
       "condition": "below",
-      "triggered": false
+      "triggered": true,
+      "triggered_at": "2026-10-23T17:38:56-03:00",
+      "trigger_price": 430.0
     },
     {
       "ticker": "IVVB11.SA",
@@ -390,7 +392,9 @@
       "ticker": "QQQI11.SA",
       "target_price": 89.53,
       "condition": "below",
-      "triggered": false
+      "triggered": true,
+      "triggered_at": "2026-10-23T17:38:56-03:00",
+      "trigger_price": 89.5
     },
     {
       "ticker": "QQQI11.SA",
