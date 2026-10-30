@@ -4,7 +4,9 @@
       "ticker": "BOVA11.SA",
       "target_price": 164.5,
       "condition": "below",
-      "triggered": false
+      "triggered": true,
+      "triggered_at": "2026-10-30T15:21:30-03:00",
+      "trigger_price": 164.21
     },
     {
       "ticker": "BOVA11.SA",
@@ -588,7 +590,9 @@
       "ticker": "XPML11.SA",
       "target_price": 95.76,
       "condition": "below",
-      "triggered": false
+      "triggered": true,
+      "triggered_at": "2026-10-30T15:21:31-03:00",
+      "trigger_price": 95.64
     },
     {
       "ticker": "XPML11.SA",
@@ -600,7 +604,9 @@
       "ticker": "BTLG11.SA",
       "target_price": 96.79,
       "condition": "below",
-      "triggered": false
+      "triggered": true,
+      "triggered_at": "2026-10-30T15:21:31-03:00",
+      "trigger_price": 96.7
     },
     {
       "ticker": "BTLG11.SA",
