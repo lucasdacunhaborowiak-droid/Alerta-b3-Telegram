@@ -666,7 +666,9 @@
       "ticker": "BTC-USD",
       "target_price": 60500,
       "condition": "below",
-      "triggered": false
+      "triggered": true,
+      "triggered_at": "2026-11-20T17:52:39-03:00",
+      "trigger_price": 58368.22
     },
     {
       "ticker": "BTC-USD",
