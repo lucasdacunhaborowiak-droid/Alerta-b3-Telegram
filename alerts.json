@@ -170,7 +170,9 @@
       "ticker": "PSSA3.SA",
       "target_price": 42,
       "condition": "below",
-      "triggered": false
+      "triggered": true,
+      "triggered_at": "2026-11-24T19:52:08-03:00",
+      "trigger_price": 41.93
     },
     {
       "ticker": "PSSA3.SA",
